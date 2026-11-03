@@ -162,3 +162,85 @@ def __init__(self, delta: float = 1.0, reduction: str = "mean") -> None:
 在当前单继承结构中，这行与 `RegressionLoss.__init__(self, reduction=reduction)` 效果相同；通常优先使用 `super()`，避免写死基类名称，并支持协作式多重继承。它更准确的含义是“沿 MRO 继续查找”，不总是“调用直接父类”。参见 [Python 对 super 的说明](https://docs.python.org/3/faq/programming.html#how-do-i-call-a-method-defined-in-a-base-class-from-a-derived-class-that-extends-it)。
 
 签名中的 `delta: float`、`reduction: str` 是类型提示，`= 1.0`、`= "mean"` 是默认值，`-> None` 表示初始化方法不返回业务结果。类型提示本身不会自动转换或校验传入值。
+
+## 7. `from __future__ import annotations` 与前向引用
+
+在本练习使用的 Python 3.11 中，这条语句让当前模块的类型标注以字符串保存。它应放在模块开头，可以写在模块说明字符串之后。
+
+```python
+from __future__ import annotations
+
+
+class Node:
+    """树节点的子节点也可以是 Node。"""
+
+    left: Node | None = None
+    right: Node | None = None
+```
+
+执行 `left: Node | None` 时，`Node` 类还在定义中，这种提前引用类型名称的写法称为**前向引用。** 有了上面的导入，解释器可以先保存标注，等类定义完成后再按需求值。[Python 类型标注的求值规则](https://docs.python.org/3/library/annotationlib.html#annotation-semantics)
+
+## 8. `Sequence` 序列类型标注
+
+`Sequence` 表示支持取长度、按位置索引和遍历的有序序列，列表和元组都符合这个接口。KDTree 的 `Sequence[Sequence[float]]` 中，外层表示点集，内层表示一个点的坐标序列。
+
+```python
+from collections.abc import Sequence
+
+points: Sequence[Sequence[float]] = [(2.0, 3.0, 1.0), (5.0, 0.0, 4.0)]
+points[0]     # 第一个点 (2.0, 3.0, 1.0)
+points[0][2]  # 第一个点的 z 坐标 1.0
+```
+
+标注描述元素类型，三维点的长度由 `point3d()` 中的 `len(point) != 3` 显式检查。[Python 序列接口](https://docs.python.org/3.11/library/collections.abc.html#collections.abc.Sequence)
+
+## 9. `@dataclass` 数据类装饰器
+
+`@dataclass` 用于装饰类。它根据带类型标注的字段，默认生成初始化方法 `__init__`、便于打印的 `__repr__` 和按字段比较的 `__eq__`。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class NearestResult:
+    """保存最近邻的坐标、原始下标和距离。"""
+
+    point: tuple[float, float, float]
+    index: int
+    distance: float
+
+
+result = NearestResult(point=(6.0, 4.0, 0.0), index=5, distance=1.5)
+```
+
+普通的 `@dataclass` 允许给 `node.left` 等字段重新赋值。`frozen=True` 限制实例创建后的字段赋值，适合保存一次查询的结果。[Python 数据类文档](https://docs.python.org/3.11/library/dataclasses.html#dataclasses.dataclass)
+
+## 10. 常用内置函数 `enumerate`、`zip`、`sum` 和 `sorted`
+
+| 写法 | 作用 | 示例结果 |
+|---|---|---|
+| `enumerate(items)` | 遍历时依次给出 `(下标, 元素)`，下标默认从 0 开始 | `list(enumerate(["a", "b"]))` 得到 `[(0, "a"), (1, "b")]` |
+| `zip(a, b)` | 将对应位置的元素配成元组，默认到最短输入结束 | `list(zip((1, 2, 3), (4, 5)))` 得到 `[(1, 4), (2, 5)]` |
+| `sum(values)` | 累加可迭代对象中的数值 | `sum([1, 4, 9])` 得到 `14` |
+| `sorted(items)` | 将输入元素按升序排入新列表，可用 `key` 指定排序键 | `sorted([3, 1, 2])` 得到 `[1, 2, 3]` |
+
+最近邻搜索中，`zip` 对齐同一坐标轴上的值，`sum` 把三项平方差相加。
+
+```python
+target, point = (4, 2, 1), (1, 2, 5)
+distance_sq = sum((a - b) ** 2 for a, b in zip(target, point))  # 9 + 0 + 16 = 25
+```
+
+## 11. `lambda` 表达式与排序键
+
+`lambda 参数: 表达式` 定义一个匿名函数，调用时返回表达式的值。`sorted(..., key=函数)` 会把每条记录传给这个函数，用返回值作为排序键。[Python 排序指南](https://docs.python.org/3.11/howto/sorting.html#key-functions)
+
+```python
+entries = [((2, 4, 1), 2), ((1, 3, 5), 1), ((2, 8, 1), 0)]  # (点, 原始下标)
+axis = 0  # 按 x 轴划分
+ordered = sorted(entries, key=lambda entry: (entry[0][axis], entry[1]))
+print([index for point, index in ordered])  # [1, 0, 2]
+```
+
+`entry[0][axis]` 取当前轴的坐标，`entry[1]` 取原始下标。上面三条记录的排序键依次为 `(2, 2)`、`(1, 1)`、`(2, 0)`。比较元组时先比第一项，因此 x 为 1 的点排在最前。剩下两个点的 x 同为 2，再比第二项，下标 0 排在下标 2 前面。
